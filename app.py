@@ -3,7 +3,8 @@ import requests
 
 app = Flask(__name__)
 
-ACCESS_TOKEN = "EAALm8v75zusBRdTlKXjkLS6hDk1fJOR6xTZCVt7Dz6Qp1sZAk6qZCjEHJmoa7lyvXfgVIZBAeO0ckq3pbnqKgZCKkjF1ZChPaUxDlITipIjApUUWeOXxbzMRAsOMbO3H75km5hVQYLka2fmr5lxp0ZC0kkgHNizwTrDcpt3RVpWfoQkmhzk4I8OapEnpxI9yvCNZAV61ZBquvocZBsILKwQSRs8q1vM8mZBwy4B0LXv9hbZAJpPgpmZBc"
+import os
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 
 CLIENTS = {
     "jr": "act_1292464679501846",
