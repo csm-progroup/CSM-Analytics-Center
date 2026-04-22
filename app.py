@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 import requests
 import os
+import json
 
 app = Flask(__name__)
 
@@ -17,13 +18,36 @@ CLIENTS = {
 GRAPH_VERSION = "v25.0"
 
 
+def meta_get(url, params):
+    response = requests.get(url, params=params, timeout=30)
+    return response.json()
+
+
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "ok",
+        "service": "CSM Analytics API",
+        "endpoints": [
+            "/client-summary?client=jr&period=last_7d",
+            "/client-summary?client=jr&since=2026-01-01&until=2026-04-21",
+            "/client-summary?client=jr&campaign_name=Whatsapp",
+            "/client-summary?client=jr&campaign_name=Whatsapp&since=2026-01-01&until=2026-04-21",
+            "/client-billing?client=barca"
+        ]
+    })
+
+
 @app.route("/client-summary")
 def client_summary():
-    client = request.args.get("client", "").lower()
-    period = request.args.get("period")          # today, yesterday, last_7d, last_30d, this_month, last_month, maximum
-    since = request.args.get("since")            # YYYY-MM-DD
-    until = request.args.get("until")            # YYYY-MM-DD
-    campaign_name = request.args.get("campaign_name")  # opcional
+    client = request.args.get("client", "").strip().lower()
+    period = request.args.get("period")
+    since = request.args.get("since")
+    until = request.args.get("until")
+    campaign_name = request.args.get("campaign_name")
+
+    if not ACCESS_TOKEN:
+        return jsonify({"error": "ACCESS_TOKEN not configured"}), 500
 
     if client not in CLIENTS:
         return jsonify({"error": "client not found"}), 404
@@ -32,18 +56,20 @@ def client_summary():
 
     url = f"https://graph.facebook.com/{GRAPH_VERSION}/{ad_account_id}/insights"
     params = {
-        "fields": "campaign_name,spend,impressions,reach,clicks,cpc,ctr",
+        "fields": "campaign_name,spend,impressions,reach,clicks,cpc,ctr,date_start,date_stop",
         "level": "campaign",
         "access_token": ACCESS_TOKEN
     }
 
     if since and until:
-        params["time_range"] = {"since": since, "until": until}
+        params["time_range"] = json.dumps({
+            "since": since,
+            "until": until
+        })
     else:
         params["date_preset"] = period or "last_7d"
 
-    response = requests.get(url, params=params, timeout=30)
-    data = response.json()
+    data = meta_get(url, params)
 
     if "error" in data:
         return jsonify(data), 400
@@ -71,7 +97,10 @@ def client_summary():
 
 @app.route("/client-billing")
 def client_billing():
-    client = request.args.get("client", "").lower()
+    client = request.args.get("client", "").strip().lower()
+
+    if not ACCESS_TOKEN:
+        return jsonify({"error": "ACCESS_TOKEN not configured"}), 500
 
     if client not in CLIENTS:
         return jsonify({"error": "client not found"}), 404
@@ -84,31 +113,41 @@ def client_billing():
         "access_token": ACCESS_TOKEN
     }
 
-    response = requests.get(url, params=params, timeout=30)
-    data = response.json()
+    data = meta_get(url, params)
 
     if "error" in data:
         return jsonify(data), 400
 
-    amount_spent = data.get("amount_spent")
-    spend_cap = data.get("spend_cap")
-    balance = data.get("balance")
+    amount_spent = int(data.get("amount_spent") or 0)
+    spend_cap = int(data.get("spend_cap") or 0)
+    balance = int(data.get("balance") or 0)
 
     remaining_budget = None
-    if spend_cap not in (None, "", "0") and amount_spent not in (None, ""):
-        try:
-            remaining_budget = int(spend_cap) - int(amount_spent)
-        except Exception:
-            remaining_budget = None
+    if spend_cap > 0:
+        remaining_budget = spend_cap - amount_spent
+
+    account_status_map = {
+        1: "ACTIVE",
+        2: "DISABLED",
+        3: "UNSETTLED",
+        7: "PENDING_RISK_REVIEW",
+        8: "PENDING_SETTLEMENT",
+        9: "IN_GRACE_PERIOD",
+        100: "PENDING_CLOSURE",
+        101: "CLOSED",
+        201: "ANY_ACTIVE",
+        202: "ANY_CLOSED"
+    }
 
     return jsonify({
         "client": client,
         "billing": {
             "name": data.get("name"),
-            "account_status": data.get("account_status"),
+            "account_status_code": data.get("account_status"),
+            "account_status_label": account_status_map.get(data.get("account_status"), "UNKNOWN"),
             "amount_spent": amount_spent,
             "spend_cap": spend_cap,
-            "balance": balance,
+            "balance_due": balance,
             "remaining_budget": remaining_budget
         }
     })
